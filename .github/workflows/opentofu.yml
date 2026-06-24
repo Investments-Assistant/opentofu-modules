@@ -1,0 +1,30 @@
+name: OpenTofu Modules
+
+on:
+  pull_request:
+    paths:
+      - "**/*.tf"
+      - "**/*.json"
+      - ".github/workflows/opentofu.yml"
+      - "Makefile"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.tf"
+      - "**/*.json"
+      - ".github/workflows/opentofu.yml"
+      - "Makefile"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: "1.12.2"
+
+      - name: Validate modules
+        run: make validate
