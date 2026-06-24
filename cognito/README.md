@@ -15,7 +15,7 @@ Use `https://<app-domain>/oauth2/idpresponse` as the callback URL.
 
 ```hcl
 module "cognito" {
-  source = "git::ssh://git@github.com/Investments-Assistant/opentofu-modules.git//cognito?ref=0.0.1"
+  source = "git::ssh://git@github.com/Investments-Assistant/opentofu-modules.git//cognito?ref=v0.0.1"
 
   cluster_name  = "investments-assistant"
   domain_prefix = "investments-assistant-auth"

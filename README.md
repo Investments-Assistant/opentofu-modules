@@ -23,14 +23,14 @@ Reference modules by subdirectory from consuming stacks:
 
 ```hcl
 module "vpc" {
-  source = "git::ssh://git@github.com/Investments-Assistant/opentofu-modules.git//vpc?ref=0.0.1"
+  source = "git::ssh://git@github.com/Investments-Assistant/opentofu-modules.git//vpc?ref=v0.0.1"
 
   cluster_name = var.cluster_name
   azs          = local.azs
 }
 ```
 
-Pin `ref` to a numeric release tag or commit SHA. For example, `ref=0.0.1`.
+Pin `ref` to a release tag or commit SHA. For example, `ref=v0.0.1`.
 
 ## Validation
 
@@ -46,11 +46,15 @@ done
 
 ## Releases
 
-Run the `Release` workflow manually from the `main` branch. It calculates the
-next numeric version from Conventional Commits since the latest SemVer tag,
-updates `CHANGELOG.md`, creates an annotated tag such as `1.0.0`, and publishes
-a GitHub release.
+Run the `Release` workflow manually from the `main` branch. It runs
+`semantic-release`, calculates the next version from Conventional Commits since
+the latest SemVer tag, writes `CHANGELOG.md`, creates a v-prefixed tag such as
+`v1.0.0`, and publishes a GitHub release. There is no version input; use the
+dry-run checkbox to preview the release without committing, tagging, or
+publishing.
 
 The changelog groups commits into sections such as `New Features`, `Fixese`,
-`Performance Improvements`, `Documentation`, `CI`, and `Chores`. The workflow
-also supports an exact numeric version override and a dry-run mode.
+`Performance Improvements`, `Documentation`, `CI`, and `Chores`. Commit subjects
+can use either `feat(scope): ...` or slash-style `feat/scope: ...` formatting.
+Semantic-release reads release history from git tags, so publish the initial
+`v0.0.1` tag before relying on consumer module refs pinned to that version.

@@ -20,7 +20,7 @@ The trust policy is scoped by:
 
 ```hcl
 module "github_actions_build_role" {
-  source = "git::ssh://git@github.com/Investments-Assistant/opentofu-modules.git//github_actions_oidc_role?ref=0.0.1"
+  source = "git::ssh://git@github.com/Investments-Assistant/opentofu-modules.git//github_actions_oidc_role?ref=v0.0.1"
 
   role_name         = "investments-assistant-github-actions-build-role"
   oidc_provider_arn = aws_iam_openid_connect_provider.github_actions.arn

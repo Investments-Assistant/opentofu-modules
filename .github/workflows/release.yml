@@ -3,12 +3,8 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Exact version to release, for example 1.2.3. Overrides automatic versioning."
-        required: false
-        type: string
       dry_run:
-        description: "Generate release notes without committing, tagging, or publishing"
+        description: "Run semantic-release without committing, tagging, or publishing"
         required: true
         default: false
         type: boolean
@@ -33,276 +29,25 @@ jobs:
             exit 1
           fi
 
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-      - name: Generate changelog
-        id: changelog
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          python3 <<'PY'
-          import datetime
-          import os
-          import pathlib
-          import re
-          import subprocess
-          import sys
+      - name: Install release dependencies
+        run: npm install --no-package-lock --no-audit --no-fund
 
-          RELEASE_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-          TAG_SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
-          COMMIT_RE = re.compile(
-              r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]+)\))?(?P<breaking>!)?: (?P<desc>.+)$"
-          )
-          SLASH_COMMIT_RE = re.compile(
-              r"^(?P<type>[a-zA-Z]+)(?:/(?P<scope>[^!:]+))?(?P<breaking>!)?: (?P<desc>.+)$"
-          )
-          SLASH_PREFIX_RE = re.compile(r"^(?P<type>[a-zA-Z]+)/(?P<desc>.+)$")
-
-          SECTION_ORDER = [
-              ("breaking", "Breaking Changes"),
-              ("feat", "New Features"),
-              ("fix", "Fixese"),
-              ("perf", "Performance Improvements"),
-              ("refactor", "Refactoring"),
-              ("docs", "Documentation"),
-              ("build", "Build System"),
-              ("ci", "CI"),
-              ("test", "Tests"),
-              ("style", "Style"),
-              ("chore", "Chores"),
-              ("revert", "Reverts"),
-              ("other", "Other Changes"),
-          ]
-          SECTION_BY_TYPE = {
-              "feat": "feat",
-              "fix": "fix",
-              "perf": "perf",
-              "refactor": "refactor",
-              "docs": "docs",
-              "build": "build",
-              "ci": "ci",
-              "test": "test",
-              "style": "style",
-              "chore": "chore",
-              "revert": "revert",
-          }
-
-
-          def git(args, check=True):
-              completed = subprocess.run(
-                  ["git", *args],
-                  check=False,
-                  text=True,
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.PIPE,
-              )
-              if check and completed.returncode != 0:
-                  print(completed.stderr, file=sys.stderr)
-                  sys.exit(completed.returncode)
-              return completed.stdout.strip()
-
-
-          def output(name, value):
-              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-                  handle.write(f"{name}={value}\n")
-
-
-          def parse_release_version(value):
-              value = value.strip()
-              match = RELEASE_SEMVER_RE.match(value)
-              if not match:
-                  raise ValueError(f"Invalid semver version: {value}. Use numbers only, for example 1.2.3.")
-              return tuple(int(part) for part in match.groups())
-
-
-          def parse_tag_version(value):
-              match = TAG_SEMVER_RE.match(value.strip())
-              return tuple(int(part) for part in match.groups()) if match else None
-
-
-          def format_version(version):
-              return ".".join(str(part) for part in version)
-
-
-          def bump_version(base, bump):
-              major, minor, patch = base
-              if bump == "major":
-                  return (major + 1, 0, 0)
-              if bump == "minor":
-                  return (major, minor + 1, 0)
-              if bump == "patch":
-                  return (major, minor, patch + 1)
-              raise ValueError(f"Unsupported bump: {bump}")
-
-
-          def latest_semver_tag():
-              candidates = []
-              for tag in git(["tag", "--list"]).splitlines():
-                  version = parse_tag_version(tag)
-                  if version:
-                      candidates.append((version, tag))
-              if not candidates:
-                  return (0, 0, 0), ""
-              return max(candidates, key=lambda item: item[0])
-
-
-          def parse_commit(subject, body):
-              match = COMMIT_RE.match(subject) or SLASH_COMMIT_RE.match(subject)
-              if match:
-                  commit_type = match.group("type").lower()
-                  scope = match.groupdict().get("scope") or ""
-                  desc = match.group("desc")
-                  breaking = bool(match.groupdict().get("breaking")) or "BREAKING CHANGE:" in body
-                  return commit_type, scope, desc, breaking
-              match = SLASH_PREFIX_RE.match(subject)
-              if match:
-                  return match.group("type").lower(), "", match.group("desc"), "BREAKING CHANGE:" in body
-              return None
-
-
-          previous_version, previous_tag = latest_semver_tag()
-          revision_range = f"{previous_tag}..HEAD" if previous_tag else "HEAD"
-
-          raw_log = git(["log", "--format=%H%x01%s%x01%b%x02", revision_range], check=False)
-          commits = []
-          for record in raw_log.split("\x02"):
-              record = record.strip()
-              if not record:
-                  continue
-              parts = record.split("\x01", 2)
-              if len(parts) != 3:
-                  continue
-              sha, subject, body = parts
-              if subject.startswith("Merge "):
-                  continue
-              parsed = parse_commit(subject, body)
-              if not parsed:
-                  continue
-              commit_type, scope, desc, breaking = parsed
-              section = SECTION_BY_TYPE.get(commit_type, "other")
-              if breaking:
-                  section = "breaking"
-              commits.append(
-                  {
-                      "sha": sha,
-                      "short": sha[:7],
-                      "type": commit_type,
-                      "scope": scope,
-                      "desc": desc,
-                      "breaking": breaking,
-                      "section": section,
-                  }
-              )
-
-          requested_version = os.environ.get("INPUT_VERSION", "").strip()
-
-          if requested_version:
-              next_version = parse_release_version(requested_version)
-          else:
-              if any(commit["breaking"] for commit in commits):
-                  bump = "major"
-              elif any(commit["type"] == "feat" for commit in commits):
-                  bump = "minor"
-              elif commits:
-                  bump = "patch"
-              else:
-                  pathlib.Path("release-notes.md").write_text(
-                      "No release created: no Conventional Commits found since the previous tag.\n",
-                      encoding="utf-8",
-                  )
-                  output("release_needed", "false")
-                  output("version", "")
-                  output("previous_tag", previous_tag)
-                  sys.exit(0)
-              next_version = bump_version(previous_version, bump)
-
-          version = format_version(next_version)
-
-          if previous_tag and next_version <= previous_version:
-              print(f"Version {version} must be greater than previous tag {previous_tag}.", file=sys.stderr)
-              sys.exit(1)
-
-          if git(["rev-parse", "-q", "--verify", f"refs/tags/{version}"], check=False):
-              print(f"Tag {version} already exists.", file=sys.stderr)
-              sys.exit(1)
-
-          today = datetime.date.today().isoformat()
-          repo = os.environ["GITHUB_REPOSITORY"]
-          grouped = {key: [] for key, _ in SECTION_ORDER}
-          for commit in commits:
-              label = f"**{commit['scope']}**: {commit['desc']}" if commit["scope"] else commit["desc"]
-              grouped[commit["section"]].append(f"- {label} ({commit['short']})")
-
-          notes = [f"## {version}", "", f"Released on {today}.", ""]
-          if previous_tag:
-              notes.extend([f"Compare: https://github.com/{repo}/compare/{previous_tag}...{version}", ""])
-          for key, title in SECTION_ORDER:
-              entries = grouped[key]
-              if entries:
-                  notes.extend([f"### {title}", "", *entries, ""])
-          if not commits:
-              notes.extend(["### Changes", "", "- No Conventional Commits found since the previous tag.", ""])
-
-          release_notes = "\n".join(notes).rstrip() + "\n"
-          pathlib.Path("release-notes.md").write_text(release_notes, encoding="utf-8")
-
-          changelog_entry = release_notes.replace(f"## {version}", f"## [{version}] - {today}", 1)
-          changelog_path = pathlib.Path("CHANGELOG.md")
-          if changelog_path.exists():
-              existing = changelog_path.read_text(encoding="utf-8").rstrip() + "\n"
-          else:
-              existing = "# Changelog\n\nAll notable changes to this project are documented in this file.\n"
-          if f"## [{version}]" in existing or f"## {version}" in existing:
-              print(f"CHANGELOG.md already contains {version}.", file=sys.stderr)
-              sys.exit(1)
-
-          lines = existing.splitlines()
-          insert_at = next((idx for idx, line in enumerate(lines) if line.startswith("## ")), len(lines))
-          updated = "\n".join(lines[:insert_at]).rstrip() + "\n\n" + changelog_entry + "\n"
-          if insert_at < len(lines):
-              updated += "\n".join(lines[insert_at:]).rstrip() + "\n"
-          changelog_path.write_text(updated, encoding="utf-8")
-
-          output("release_needed", "true")
-          output("version", version)
-          output("previous_tag", previous_tag)
-          PY
-
-      - name: Write release summary
-        if: steps.changelog.outputs.release_needed == 'true'
-        run: |
-          {
-            echo "Release: ${{ steps.changelog.outputs.version }}"
-            echo
-            cat release-notes.md
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Show skipped release summary
-        if: steps.changelog.outputs.release_needed == 'false'
-        run: cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Commit changelog and tag
-        if: steps.changelog.outputs.release_needed == 'true' && inputs.dry_run == false
-        env:
-          VERSION: ${{ steps.changelog.outputs.version }}
-        run: |
-          git add CHANGELOG.md
-          git commit -m "chore(release): ${VERSION}"
-          git tag -a "${VERSION}" -m "${VERSION}"
-          git push origin HEAD:main
-          git push origin "${VERSION}"
-
-      - name: Create GitHub release
-        if: steps.changelog.outputs.release_needed == 'true' && inputs.dry_run == false
+      - name: Run semantic-release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.changelog.outputs.version }}
-        run: gh release create "${VERSION}" --title "${VERSION}" --notes-file release-notes.md --verify-tag
-
-      - name: Dry run diff
-        if: steps.changelog.outputs.release_needed == 'true' && inputs.dry_run == true
-        run: git diff -- CHANGELOG.md
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            npx semantic-release --dry-run
+          else
+            npx semantic-release
+          fi
